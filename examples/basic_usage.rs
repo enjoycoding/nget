@@ -4,7 +4,6 @@
 
 use nget::{DownloadConfig, Downloader};
 use std::path::PathBuf;
-use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

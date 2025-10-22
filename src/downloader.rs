@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use futures::StreamExt;
-use reqwest::{header, Client, ClientBuilder};
+use reqwest::{header, Client};
 use std::cmp::min;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};

@@ -16,6 +16,7 @@ A high-performance, concurrent HTTP downloader written in Rust with resume capab
 ### From Source
 
 ```bash
-git clone https://github.com/yourusername/concurrent-downloader
-cd concurrent-downloader
+git clone https://github.com/enjoycoding/nget
+cd nget
 cargo install --path .
+```

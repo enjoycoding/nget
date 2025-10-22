@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 /// Custom error types for the downloader
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum DownloadError {
     #[error("HTTP error: {0}")]
