@@ -1,4 +1,4 @@
-//! Basic usage example for concurrent-downloader
+//! Basic usage example for nget
 //!
 //! This example shows how to use the downloader programmatically
 
@@ -11,8 +11,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         url: "https://httpbin.org/bytes/1048576".to_string(), // 1MB test file
         output_path: PathBuf::from("test_download.bin"),
         num_threads: 4,
-        user_agent: "nget/1.0".to_string(),
-        timeout: 0,
+        user_agent: format!("nget/{}", env!("CARGO_PKG_VERSION")),
+        timeout: None,
         resume: true,
         force: false,
     };

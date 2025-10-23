@@ -1,6 +1,6 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use futures::StreamExt;
-use reqwest::{header, Client};
+use reqwest::{Client, header};
 use std::cmp::min;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
@@ -23,8 +23,8 @@ pub struct Downloader {
 impl Downloader {
     pub fn new(config: DownloadConfig) -> Result<Self> {
         let mut client_builder = Client::builder().user_agent(&config.user_agent);
-        if config.timeout > 0 {
-            client_builder = client_builder.timeout(Duration::from_secs(config.timeout));
+        if let Some(timeout) = config.timeout {
+            client_builder = client_builder.timeout(Duration::from_secs(timeout));
         }
         let client = client_builder.build()?;
 

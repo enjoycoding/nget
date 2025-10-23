@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
     let downloader = Downloader::new(config)?;
 
     // Set up Ctrl+C handler for graceful interruption
-    let _downloader_clone = downloader.clone();
+    // let _downloader_clone = downloader.clone();
     ctrlc::set_handler(move || {
         println!("\n⚠️  Download interrupted by user. You can resume with --resume flag.");
         std::process::exit(1);

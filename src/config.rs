@@ -13,17 +13,17 @@ pub struct Cli {
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 
-    /// Number of concurrent threads
-    #[arg(short, long, default_value_t = 4)]
-    pub threads: usize,
+    /// Number of concurrent threads, default is the number of CPU cores
+    #[arg(short, long)]
+    pub threads: Option<usize>,
 
     /// User agent
-    #[arg(long, default_value = "nget/1.0")]
+    #[arg(long, default_value = concat!("nget/", env!("CARGO_PKG_VERSION")))]
     pub user_agent: String,
 
-    /// Timeout in seconds
-    #[arg(long, default_value_t = 0)]
-    pub timeout: u64,
+    /// Timeout in seconds, default no timeout
+    #[arg(long)]
+    pub timeout: Option<u64>,
 
     /// Enable resume capability
     #[arg(short, long)]
@@ -84,7 +84,7 @@ pub struct DownloadConfig {
     pub output_path: PathBuf,
     pub num_threads: usize,
     pub user_agent: String,
-    pub timeout: u64,
+    pub timeout: Option<u64>,
     pub resume: bool,
     pub force: bool,
 }
@@ -98,7 +98,11 @@ impl From<Cli> for DownloadConfig {
         Self {
             url: cli.url,
             output_path,
-            num_threads: cli.threads,
+            num_threads: if let Some(threads) = cli.threads {
+                threads
+            } else {
+                num_cpus::get()
+            },
             user_agent: cli.user_agent,
             timeout: cli.timeout,
             resume: cli.resume,

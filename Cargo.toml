@@ -1,9 +1,9 @@
 [package]
 name = "nget"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 authors = ["山人 <octoape@qq.com>"]
-description = "A network resource downloader."
+description = "A Concurrent HTTP Downloader."
 license = "Apache-2.0"
 readme = "README.md"
 homepage = "https://github.com/enjoycoding/nget"
@@ -25,6 +25,7 @@ humansize = { version = "2.1"}
 better-panic = "0.3"
 ctrlc = "3.4"
 thiserror = "2.0.17"
+num_cpus = "1.17.0"
 
 [dev-dependencies]
 tempfile = "3.23"
