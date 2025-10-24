@@ -5,7 +5,7 @@ use std::cmp::min;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 use crate::config::{DownloadConfig, DownloadRange as ConfigRange, DownloadState};
@@ -430,11 +430,20 @@ impl Downloader {
             return Ok(());
         }
 
-        // Create progress bar
+        // 创建进度条
         let pb = self.progress_manager.create_simple_progress(total_size);
         pb.set_position(start_pos);
 
-        // Set up range request for resume
+        // 初始化下载管理器状态 - 使用公共方法
+        self.progress_manager.set_downloaded_bytes(start_pos).await;
+        self.progress_manager.set_start_time(Instant::now()).await;
+
+        // 初始速度显示
+        self.progress_manager
+            .update_simple_progress_speed(&pb, start_pos)
+            .await;
+
+        // 设置范围请求用于恢复
         let response = if is_resume {
             let range_header = format!("bytes={}-", start_pos);
             self.client
@@ -448,15 +457,32 @@ impl Downloader {
 
         let mut downloaded = start_pos;
         let mut stream = response.bytes_stream();
+        let mut last_speed_update = Instant::now();
+        // let mut total_chunk_size = 0u64;
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
+            let chunk_size = chunk.len() as u64;
             file.write_all(&chunk)?;
-            downloaded = min(downloaded + (chunk.len() as u64), total_size);
+            downloaded = min(downloaded + chunk_size, total_size);
+            // total_chunk_size += chunk_size;
             pb.set_position(downloaded);
+
+            // 定期更新速度显示（每秒最多一次）
+            if last_speed_update.elapsed() > Duration::from_secs(1) {
+                self.progress_manager
+                    .update_simple_progress_speed(&pb, downloaded)
+                    .await;
+                last_speed_update = Instant::now();
+            }
         }
 
+        // 最终速度更新
+        self.progress_manager
+            .update_simple_progress_speed(&pb, downloaded)
+            .await;
         pb.finish_with_message("✅ Download completed!");
+
         println!(
             "🎉 Single thread download finished: {}",
             humansize::format_size(downloaded, humansize::BINARY)

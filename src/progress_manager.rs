@@ -1,4 +1,5 @@
-use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressState, ProgressStyle};
+// src/progress_manager.rs
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -12,6 +13,7 @@ pub struct ProgressManager {
     start_time: Arc<Mutex<Option<Instant>>>,
     downloaded_bytes: Arc<Mutex<u64>>,
     last_update: Arc<Mutex<Instant>>,
+    last_downloaded: Arc<Mutex<u64>>, // 用于计算瞬时速度
 }
 
 impl ProgressManager {
@@ -28,6 +30,7 @@ impl ProgressManager {
             start_time: Arc::new(Mutex::new(None)),
             downloaded_bytes: Arc::new(Mutex::new(0)),
             last_update: Arc::new(Mutex::new(Instant::now())),
+            last_downloaded: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -36,24 +39,20 @@ impl ProgressManager {
         let pb = self.multi_progress.add(ProgressBar::new(total_size));
         pb.set_position(initial_downloaded);
 
-        // Create rich progress bar style
+        // 创建更丰富的进度条样式
         pb.set_style(
-            ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes:>9}/{total_bytes:>9} ({percent:>3}%) {binary_bytes_per_sec:>12} ETA: {eta:>6} {msg}")
+            ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes:>9}/{total_bytes:>9} ({percent:>3}%) {msg}")
                 .unwrap()
                 .progress_chars("█▉▊▋▌▍▎▏  ")
-                .with_key("eta", |state: &ProgressState, w: &mut dyn std::fmt::Write| {
-                    write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap()
-                })
-                .with_key("binary_bytes_per_sec", |state: &ProgressState, w: &mut dyn std::fmt::Write| {
-                    write!(w, "{:.1}/s", humansize::format_size(state.per_sec() as u64, humansize::BINARY)).unwrap()
-                })
         );
 
-        // Set initial message
-        pb.set_message("Downloading...".to_string());
+        // 设置消息显示当前状态
+        pb.set_message("Initializing...".to_string());
 
         *self.main_progress.lock().await = Some(pb);
         *self.start_time.lock().await = Some(Instant::now());
+        *self.downloaded_bytes.lock().await = initial_downloaded;
+        *self.last_downloaded.lock().await = initial_downloaded;
     }
 
     /// Add progress bar for a download chunk
@@ -78,29 +77,68 @@ impl ProgressManager {
         pb
     }
 
-    /// Update main progress bar
+    /// Format speed with proper units
+    fn format_speed(speed_bytes_per_sec: f64) -> String {
+        const KB: f64 = 1024.0;
+        const MB: f64 = 1024.0 * 1024.0;
+        const GB: f64 = 1024.0 * 1024.0 * 1024.0;
+
+        if speed_bytes_per_sec >= GB {
+            format!("{:.1} GiB/s", speed_bytes_per_sec / GB)
+        } else if speed_bytes_per_sec >= MB {
+            format!("{:.1} MiB/s", speed_bytes_per_sec / MB)
+        } else if speed_bytes_per_sec >= KB {
+            format!("{:.1} KiB/s", speed_bytes_per_sec / KB)
+        } else {
+            format!("{:.0} B/s", speed_bytes_per_sec)
+        }
+    }
+
+    /// Update main progress bar with accurate speed calculation
     pub async fn update_main_progress(&self, increment: u64) {
         if let Some(pb) = &*self.main_progress.lock().await {
             pb.inc(increment);
 
-            // Update downloaded bytes counter
+            // 更新下载字节数
             let mut downloaded = self.downloaded_bytes.lock().await;
             *downloaded += increment;
 
-            // Update last update time
-            *self.last_update.lock().await = Instant::now();
+            let now = Instant::now();
+            let last_update = *self.last_update.lock().await;
+            let mut last_downloaded = self.last_downloaded.lock().await;
 
-            // Calculate and display download speed
-            if let Some(start_time) = *self.start_time.lock().await {
-                let elapsed = start_time.elapsed().as_secs_f64();
-                if elapsed > 0.0 {
-                    let speed = *downloaded as f64 / elapsed;
-                    let speed_str = format!(
-                        "{:.1}/s",
-                        humansize::format_size(speed as u64, humansize::BINARY)
-                    );
+            // 计算瞬时速度（基于最近2秒的数据，更稳定）
+            let time_diff = now.duration_since(last_update).as_secs_f64();
 
-                    // Update message with more information
+            if time_diff >= 2.0 {
+                // 至少2秒才更新速度，避免抖动
+                let downloaded_diff = *downloaded - *last_downloaded;
+                let speed_bytes_per_sec = (downloaded_diff as f64) / time_diff;
+
+                // 格式化速度显示
+                let speed_str = if speed_bytes_per_sec > 0.0 {
+                    Self::format_speed(speed_bytes_per_sec)
+                } else {
+                    "0 B/s".to_string()
+                };
+
+                let msg = format!(
+                    "Speed: {} | Active threads: {}",
+                    speed_str,
+                    self.get_active_threads_count().await
+                );
+                pb.set_message(msg);
+
+                // 重置计数器和时间
+                *last_downloaded = *downloaded;
+                *self.last_update.lock().await = now;
+            } else if time_diff >= 0.5 {
+                // 如果时间较短但已经有数据，显示估算速度
+                let downloaded_diff = *downloaded - *last_downloaded;
+                if downloaded_diff > 0 {
+                    let speed_bytes_per_sec = (downloaded_diff as f64) / time_diff;
+                    let speed_str = Self::format_speed(speed_bytes_per_sec);
+
                     let msg = format!(
                         "Speed: {} | Active threads: {}",
                         speed_str,
@@ -115,9 +153,22 @@ impl ProgressManager {
     /// Finish main progress bar with completion message
     pub async fn finish_main_progress(&self, message: &str) {
         if let Some(pb) = &*self.main_progress.lock().await {
+            // 计算平均速度
+            if let Some(start_time) = *self.start_time.lock().await {
+                let elapsed = start_time.elapsed().as_secs_f64();
+                let total_downloaded = *self.downloaded_bytes.lock().await;
+
+                if elapsed > 0.0 {
+                    let avg_speed = total_downloaded as f64 / elapsed;
+                    let avg_speed_str = Self::format_speed(avg_speed);
+
+                    println!("📊 Average speed: {}", avg_speed_str);
+                }
+            }
+
             pb.finish_with_message(message.to_string());
 
-            // Hide all chunk progress bars
+            // 隐藏所有分块进度条
             let mut chunk_progresses = self.chunk_progresses.lock().await;
             for chunk_pb in chunk_progresses.iter_mut() {
                 chunk_pb.finish_and_clear();
@@ -144,7 +195,7 @@ impl ProgressManager {
     /// Check if download seems stalled
     pub async fn check_stalled(&self) -> bool {
         let last_update = *self.last_update.lock().await;
-        last_update.elapsed() > Duration::from_secs(30) // Consider stalled after 30 seconds
+        last_update.elapsed() > Duration::from_secs(120) // 2分钟无活动认为卡住
     }
 
     /// Get total downloaded bytes
@@ -157,17 +208,38 @@ impl ProgressManager {
         let pb = self.multi_progress.add(ProgressBar::new(total_size));
 
         pb.set_style(
-            ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{bar:40}] {bytes:>9}/{total_bytes:>9} ({percent:>3}%) {binary_bytes_per_sec:>12} ETA: {eta:>6}")
+            ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{bar:40}] {bytes:>9}/{total_bytes:>9} ({percent:>3}%) {msg}")
                 .unwrap()
                 .progress_chars("█▉▊▋▌▍▎▏ ")
-                .with_key("eta", |state: &ProgressState, w: &mut dyn std::fmt::Write| {
-                    write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap()
-                })
-                .with_key("binary_bytes_per_sec", |state: &ProgressState, w: &mut dyn std::fmt::Write| {
-                    write!(w, "{:.1}/s", humansize::format_size(state.per_sec() as u64, humansize::BINARY)).unwrap()
-                })
         );
 
         pb
     }
+
+    /// 手动更新单线程下载的速度显示
+    pub async fn update_simple_progress_speed(&self, pb: &ProgressBar, downloaded: u64) {
+        if let Some(start_time) = *self.start_time.lock().await {
+            let elapsed = start_time.elapsed().as_secs_f64();
+            if elapsed > 0.0 {
+                let speed = downloaded as f64 / elapsed;
+                let speed_str = Self::format_speed(speed);
+                pb.set_message(format!("Speed: {}", speed_str));
+            }
+        }
+    }
+
+    // 新增公共方法：设置下载字节数
+    pub async fn set_downloaded_bytes(&self, bytes: u64) {
+        *self.downloaded_bytes.lock().await = bytes;
+    }
+
+    // 新增公共方法：设置开始时间
+    pub async fn set_start_time(&self, start_time: Instant) {
+        *self.start_time.lock().await = Some(start_time);
+    }
+
+    // // 新增公共方法：获取开始时间
+    // pub async fn get_start_time(&self) -> Option<Instant> {
+    //     *self.start_time.lock().await
+    // }
 }
