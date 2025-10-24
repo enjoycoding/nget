@@ -11,7 +11,7 @@ pub struct StateManager {
 
 impl StateManager {
     pub fn new(output_path: &Path) -> Self {
-        let state_path = output_path.with_extension("download-state");
+        let state_path = output_path.with_extension("nget");
         Self { state_path }
     }
 

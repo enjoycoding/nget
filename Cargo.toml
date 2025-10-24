@@ -1,6 +1,6 @@
 [package]
 name = "nget"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 authors = ["山人 <octoape@qq.com>"]
 description = "A Concurrent HTTP Downloader."
