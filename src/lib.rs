@@ -1,6 +1,5 @@
 mod config;
 mod downloader;
-mod error;
 mod progress_manager;
 mod state_manager;
 
